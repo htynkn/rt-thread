@@ -25,10 +25,10 @@ struct gd32_i2c_config
     rt_uint32_t sda_pin;       
     rt_uint32_t sda_af;        
     
+    rt_uint32_t i2c_clock_hz;  /* I2C clock frequency in Hz */
     const char *device_name;   
 };
 
-/* GD32 硬件 I2C 总线设备结构体 */
 struct gd32_i2c
 {
     struct rt_i2c_bus_device parent;      

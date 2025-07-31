@@ -25,12 +25,13 @@ static const struct gd32_i2c_config i2c_configs[] =
         .scl_clk = RCU_GPIOA,
         .scl_port = GPIOA,
         .scl_pin = GPIO_PIN_9,
-        .scl_af = GPIO_AF_1, 
+        .scl_af = GPIO_AF_4, 
         .sda_clk = RCU_GPIOA,
         .sda_port = GPIOA,
         .sda_pin = GPIO_PIN_10,
-        .sda_af = GPIO_AF_1, 
+        .sda_af = GPIO_AF_4, 
 
+        .i2c_clock_hz = BSP_HW_I2C0_CLOCK_SPEED,
         .device_name = "i2c0",
     },
 #endif
@@ -47,10 +48,10 @@ static const struct gd32_i2c_config i2c_configs[] =
         .sda_port = GPIOB,
         .sda_pin = GPIO_PIN_11,
         .sda_af = GPIO_AF_1, 
+        .i2c_clock_hz = BSP_HW_I2C1_CLOCK_SPEED,
         .device_name = "i2c1",
     },
 #endif
-};
 };
 
 static struct gd32_i2c i2c_objs[sizeof(i2c_configs) / sizeof(i2c_configs[0])];
@@ -65,7 +66,6 @@ static rt_ssize_t gd32_i2c_master_xfer(struct rt_i2c_bus_device *bus,
     rt_uint32_t i;
     rt_err_t ret = RT_EOK;
 
-    /* 等待总线空闲 */
     while (i2c_flag_get(i2c_periph, I2C_FLAG_I2CBSY));
 
     for (i = 0; i < num; i++)
@@ -73,11 +73,10 @@ static rt_ssize_t gd32_i2c_master_xfer(struct rt_i2c_bus_device *bus,
         struct rt_i2c_msg *msg = &msgs[i];
         rt_uint16_t slave_addr = msg->addr;
         
-        /* 发送起始信号 */
         i2c_start_on_bus(i2c_periph);
         while (!i2c_flag_get(i2c_periph, I2C_FLAG_SBSEND));
 
-        if (msg->flags & RT_I2C_RD) /* 读操作 */
+        if (msg->flags & RT_I2C_RD)
         {
             i2c_master_addressing(i2c_periph, slave_addr << 1, I2C_RECEIVER);
         }
@@ -89,7 +88,7 @@ static rt_ssize_t gd32_i2c_master_xfer(struct rt_i2c_bus_device *bus,
         while (!i2c_flag_get(i2c_periph, I2C_FLAG_ADDSEND));
         i2c_flag_clear(i2c_periph, I2C_FLAG_ADDSEND);
         
-        if (msg->flags & RT_I2C_RD) /* 读数据 */
+        if (msg->flags & RT_I2C_RD)
         {
             if (msg->len == 1)
             {
@@ -150,11 +149,7 @@ int rt_hw_i2c_init(void)
 
         i2c_obj->config = config;
         
-        /*
-         * TODO: 从 board.h 获取时钟频率, 此处为示例
-         * 您可以在板级配置中定义 I2C0_CLOCK_HZ, I2C1_CLOCK_HZ
-         */
-        i2c_obj->i2c_clock_hz = 100000; // 默认为 100KHz
+        i2c_obj->i2c_clock_hz = config->i2c_clock_hz;
 
         rcu_periph_clock_enable(config->periph_clk);
         rcu_periph_clock_enable(config->scl_clk);
