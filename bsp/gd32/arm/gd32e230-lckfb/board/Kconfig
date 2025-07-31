@@ -146,11 +146,11 @@ menu "On-chip Peripheral Drivers"
             select RT_USING_I2C
             default n
             if BSP_USING_HW_I2C
-                config BSP_USING_I2C0
+                config BSP_USING_HW_I2C0
                     bool "Enable I2C0"
                     default y
                 
-                config BSP_USING_I2C1
+                config BSP_USING_HW_I2C1
                     bool "Enable I2C1"
                     default n
             endif
