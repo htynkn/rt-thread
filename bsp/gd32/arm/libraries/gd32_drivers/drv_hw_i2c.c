@@ -310,21 +310,21 @@ int rt_hw_i2c_init(void)
         i2c_obj->parent.timeout = RT_TICK_PER_SECOND; // Default 1s timeout
 
         /* Enable clocks */
-        rcu_periph_clock_enable(config->periph_clk);
         rcu_periph_clock_enable(config->scl_clk);
         if (config->scl_clk != config->sda_clk)
         {
             rcu_periph_clock_enable(config->sda_clk);
         }
+        rcu_periph_clock_enable(config->periph_clk);
 
         /* Configure GPIO */
+        gpio_af_set(config->scl_port, config->scl_af, config->scl_pin);
         gpio_mode_set(config->scl_port, GPIO_MODE_AF, GPIO_PUPD_PULLUP, config->scl_pin);
         gpio_output_options_set(config->scl_port, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, config->scl_pin);
-        gpio_af_set(config->scl_port, config->scl_af, config->scl_pin);
-
+        
+        gpio_af_set(config->sda_port, config->sda_af, config->sda_pin);
         gpio_mode_set(config->sda_port, GPIO_MODE_AF, GPIO_PUPD_PULLUP, config->sda_pin);
         gpio_output_options_set(config->sda_port, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, config->sda_pin);
-        gpio_af_set(config->sda_port, config->sda_af, config->sda_pin);
 
         /* Configure I2C peripheral */
         i2c_deinit(config->i2c_periph);
@@ -335,7 +335,7 @@ int rt_hw_i2c_init(void)
 
         /* Configure NVIC for interrupts */
         nvic_irq_enable(config->ev_irq_type, 2);
-        nvic_irq_enable(config->er_irq_type, 2);
+        nvic_irq_enable(config->er_irq_type, 1);
 
         /* Register I2C bus device */
         result = rt_i2c_bus_device_register(&i2c_obj->parent, config->device_name);
