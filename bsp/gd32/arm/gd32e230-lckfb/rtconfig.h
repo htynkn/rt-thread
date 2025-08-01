@@ -329,8 +329,9 @@
 
 /* end of touch drivers */
 #define PKG_USING_SSD1306
+#define PKG_USING_SSD1306_DEBUG
 #define PKG_USING_SSD1306_I2C_ADDRESS 0x3C
-#define PKG_USING_SSD1306_I2C_BUS_NAME "i2c1"
+#define PKG_USING_SSD1306_I2C_BUS_NAME "i2c0"
 #define PKG_USING_SSD1306_LATEST_VERSION
 /* end of peripheral libraries and drivers */
 
@@ -424,8 +425,8 @@
 /* I2C Configuration */
 
 #define BSP_USING_HW_I2C
-#define BSP_USING_HW_I2C1
-#define BSP_HW_I2C1_CLOCK_SPEED 100000
+#define BSP_USING_HW_I2C0
+#define BSP_HW_I2C0_CLOCK_SPEED 400000
 /* end of I2C Configuration */
 /* end of On-chip Peripheral Drivers */
 
