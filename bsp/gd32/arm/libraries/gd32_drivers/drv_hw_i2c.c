@@ -104,7 +104,9 @@ static void gd32_i2c_irq_handler(struct gd32_i2c *i2c_obj)
                 {
                     i2c_stop_on_bus(i2c_periph);
                 }
-                i2c_interrupt_disable(i2c_periph, I2C_INT_EV | I2C_INT_ERR | I2C_INT_BUF); // IMMEDIATE DISABLE
+                i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
+                i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
+                i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
                 i2c_obj->result = RT_EOK;
                 rt_completion_done(&i2c_obj->completion);
             }
@@ -121,7 +123,9 @@ static void gd32_i2c_irq_handler(struct gd32_i2c *i2c_obj)
                 i2c_stop_on_bus(i2c_periph);
             }
             i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
-            i2c_interrupt_disable(i2c_periph, I2C_INT_EV | I2C_INT_ERR | I2C_INT_BUF); // IMMEDIATE DISABLE
+            i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
+            i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
+            i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
             i2c_obj->result = RT_EOK;
             rt_completion_done(&i2c_obj->completion);
         }
@@ -146,7 +150,9 @@ static void gd32_i2c_irq_handler(struct gd32_i2c *i2c_obj)
                         {
                             i2c_stop_on_bus(i2c_periph);
                         }
-                        i2c_interrupt_disable(i2c_periph, I2C_INT_EV | I2C_INT_ERR | I2C_INT_BUF); // IMMEDIATE DISABLE
+                        i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
+                        i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
+                        i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
                         i2c_obj->result = RT_EOK;
                         rt_completion_done(&i2c_obj->completion);
                     }
