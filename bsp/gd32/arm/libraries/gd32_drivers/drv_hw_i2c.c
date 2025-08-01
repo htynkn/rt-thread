@@ -44,6 +44,7 @@ static struct gd32_i2c i2c_objs[sizeof(i2c_configs) / sizeof(i2c_configs[0])];
  */
 static void gd32_i2c_irq_handler(struct gd32_i2c *i2c_obj)
 {
+    LOG_D("gd32_i2c_irq_handler");
     uint32_t i2c_periph = i2c_obj->config->i2c_periph;
 
     /* Start bit sent successfully */
@@ -145,6 +146,8 @@ else if(i2c_flag_get(i2c_periph, I2C_FLAG_MASTER) && !i2c_flag_get(i2c_periph, I
  */
 static void gd32_i2c_err_irq_handler(struct gd32_i2c *i2c_obj)
 {
+    LOG_D("gd32_i2c_err_irq_handler.");
+
     uint32_t i2c_periph = i2c_obj->config->i2c_periph;
     i2c_obj->result = -RT_ERROR; // Default error
 

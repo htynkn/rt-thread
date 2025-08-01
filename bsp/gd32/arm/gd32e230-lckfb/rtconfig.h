@@ -61,7 +61,7 @@
 
 /* end of rt_strnlen options */
 /* end of klibc options */
-#define RT_NAME_MAX 16
+#define RT_NAME_MAX 20
 #define RT_CPUS_NR 1
 #define RT_ALIGN_SIZE 8
 #define RT_THREAD_PRIORITY_32
@@ -128,6 +128,8 @@
 #define RT_USING_SERIAL
 #define RT_USING_SERIAL_V1
 #define RT_SERIAL_RB_BUFSZ 64
+#define RT_USING_I2C
+#define RT_USING_I2C_BITOPS
 #define RT_USING_PIN
 /* end of Device Drivers */
 
@@ -166,6 +168,21 @@
 
 /* Utilities */
 
+#define RT_USING_ULOG
+#define ULOG_OUTPUT_LVL_D
+#define ULOG_OUTPUT_LVL 7
+#define ULOG_USING_ISR_LOG
+#define ULOG_ASSERT_ENABLE
+#define ULOG_LINE_BUF_SIZE 128
+
+/* log format */
+
+#define ULOG_USING_COLOR
+#define ULOG_OUTPUT_TIME
+#define ULOG_OUTPUT_LEVEL
+#define ULOG_OUTPUT_TAG
+/* end of log format */
+#define ULOG_BACKEND_USING_CONSOLE
 /* end of Utilities */
 
 /* Using USB legacy version */
@@ -311,6 +328,10 @@
 /* touch drivers */
 
 /* end of touch drivers */
+#define PKG_USING_SSD1306
+#define PKG_USING_SSD1306_I2C_ADDRESS 0x3C
+#define PKG_USING_SSD1306_I2C_BUS_NAME "i2c1"
+#define PKG_USING_SSD1306_LATEST_VERSION
 /* end of peripheral libraries and drivers */
 
 /* AI packages */
@@ -402,6 +423,9 @@
 
 /* I2C Configuration */
 
+#define BSP_USING_HW_I2C
+#define BSP_USING_HW_I2C1
+#define BSP_HW_I2C1_CLOCK_SPEED 100000
 /* end of I2C Configuration */
 /* end of On-chip Peripheral Drivers */
 
