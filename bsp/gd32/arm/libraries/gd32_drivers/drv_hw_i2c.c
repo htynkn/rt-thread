@@ -164,31 +164,6 @@ static void gd32_i2c_err_irq_handler(struct gd32_i2c *i2c_obj)
 }
 
 
-#ifdef BSP_USING_HW_I2C0
-void I2C0_EV_IRQHandler(void) { 
-    rt_interrupt_enter(); 
-    gd32_i2c_irq_handler(&i2c_objs[0]); 
-    rt_interrupt_leave(); 
-}
-void I2C0_ER_IRQHandler(void) {
-    rt_interrupt_enter(); 
-    gd32_i2c_err_irq_handler(&i2c_objs[0]); 
-    rt_interrupt_leave(); 
-}
-#endif
-#ifdef BSP_USING_HW_I2C1
-void I2C1_EV_IRQHandler(void) { 
-    rt_interrupt_enter(); 
-    gd32_i2c_irq_handler(&i2c_objs[0]); 
-    rt_interrupt_leave(); 
-}
-void I2C1_ER_IRQHandler(void) { 
-    rt_interrupt_enter(); 
-    gd32_i2c_err_irq_handler(&i2c_objs[0]); 
-    rt_interrupt_leave(); }
-#endif
-
-
 static rt_ssize_t gd32_i2c_master_xfer(struct rt_i2c_bus_device *bus, struct rt_i2c_msg msgs[], rt_uint32_t num)
 {
     struct gd32_i2c *i2c_obj = rt_container_of(bus, struct gd32_i2c, parent);
@@ -271,6 +246,47 @@ static rt_ssize_t gd32_i2c_master_xfer(struct rt_i2c_bus_device *bus, struct rt_
 
     return num;
 }
+
+
+#if defined(BSP_USING_HW_I2C0)
+    #define I2C0_ENABLED_INDEX 0
+    #if defined(BSP_USING_HW_I2C1)
+        #define I2C1_ENABLED_INDEX 1
+    #else
+        #define I2C1_ENABLED_INDEX -1
+    #endif
+#else 
+    #define I2C0_ENABLED_INDEX -1
+    #if defined(BSP_USING_HW_I2C1)
+        #define I2C1_ENABLED_INDEX 0
+    #else
+        #define I2C1_ENABLED_INDEX -1
+    #endif
+#endif
+
+#ifdef BSP_USING_HW_I2C0
+void I2C0_EV_IRQHandler(void) { 
+    rt_interrupt_enter(); 
+    gd32_i2c_irq_handler(&i2c_objs[I2C0_ENABLED_INDEX]); 
+    rt_interrupt_leave(); 
+}
+void I2C0_ER_IRQHandler(void) {
+    rt_interrupt_enter(); 
+    gd32_i2c_err_irq_handler(&i2c_objs[I2C0_ENABLED_INDEX]); 
+    rt_interrupt_leave(); 
+}
+#endif
+#ifdef BSP_USING_HW_I2C1
+void I2C1_EV_IRQHandler(void) { 
+    rt_interrupt_enter(); 
+    gd32_i2c_irq_handler(&i2c_objs[I2C1_ENABLED_INDEX]); 
+    rt_interrupt_leave(); 
+}
+void I2C1_ER_IRQHandler(void) { 
+    rt_interrupt_enter(); 
+    gd32_i2c_err_irq_handler(&i2c_objs[I2C1_ENABLED_INDEX]); 
+    rt_interrupt_leave(); }
+#endif
 
 static const struct rt_i2c_bus_device_ops gd32_i2c_ops =
 {
