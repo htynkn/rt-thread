@@ -165,12 +165,27 @@ static void gd32_i2c_err_irq_handler(struct gd32_i2c *i2c_obj)
 
 
 #ifdef BSP_USING_HW_I2C0
-void I2C0_EV_IRQHandler(void) { rt_interrupt_enter(); gd32_i2c_irq_handler(&i2c_objs[0]); rt_interrupt_leave(); }
-void I2C0_ER_IRQHandler(void) { rt_interrupt_enter(); gd32_i2c_err_irq_handler(&i2c_objs[0]); rt_interrupt_leave(); }
+void I2C0_EV_IRQHandler(void) { 
+    rt_interrupt_enter(); 
+    gd32_i2c_irq_handler(&i2c_objs[0]); 
+    rt_interrupt_leave(); 
+}
+void I2C0_ER_IRQHandler(void) {
+    rt_interrupt_enter(); 
+    gd32_i2c_err_irq_handler(&i2c_objs[0]); 
+    rt_interrupt_leave(); 
+}
 #endif
 #ifdef BSP_USING_HW_I2C1
-void I2C1_EV_IRQHandler(void) { rt_interrupt_enter(); gd32_i2c_irq_handler(&i2c_objs[1]); rt_interrupt_leave(); }
-void I2C1_ER_IRQHandler(void) { rt_interrupt_enter(); gd32_i2c_err_irq_handler(&i2c_objs[1]); rt_interrupt_leave(); }
+void I2C1_EV_IRQHandler(void) { 
+    rt_interrupt_enter(); 
+    gd32_i2c_irq_handler(&i2c_objs[0]); 
+    rt_interrupt_leave(); 
+}
+void I2C1_ER_IRQHandler(void) { 
+    rt_interrupt_enter(); 
+    gd32_i2c_err_irq_handler(&i2c_objs[0]); 
+    rt_interrupt_leave(); }
 #endif
 
 
@@ -218,7 +233,9 @@ static rt_ssize_t gd32_i2c_master_xfer(struct rt_i2c_bus_device *bus, struct rt_
         }
 
         /* Enable interrupts */
-        i2c_interrupt_enable(i2c_periph, I2C_INT_EV | I2C_INT_BUF | I2C_INT_ERR);
+        i2c_interrupt_enable(i2c_periph, I2C_INT_EV);
+        i2c_interrupt_enable(i2c_periph, I2C_INT_BUF);
+        i2c_interrupt_enable(i2c_periph, I2C_INT_ERR);
         /* Generate start condition */
         i2c_start_on_bus(i2c_periph);
 
@@ -226,7 +243,9 @@ static rt_ssize_t gd32_i2c_master_xfer(struct rt_i2c_bus_device *bus, struct rt_
         ret = rt_completion_wait(&i2c_obj->completion, bus->timeout);
 
         /* Disable interrupts after transfer is done or timed out */
-        i2c_interrupt_disable(i2c_periph, I2C_INT_EV | I2C_INT_BUF | I2C_INT_ERR);
+        i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
+        i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
+        i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
 
         /* Restore ACK and ACKPOS to default state for next transfer */
         i2c_ack_config(i2c_periph, I2C_ACK_ENABLE);
