@@ -95,35 +95,48 @@ static void gd32_i2c_irq_handler(struct gd32_i2c *i2c_obj)
         }
     }
     /* Master receiver logic */
-    else if(i2c_flag_get(i2c_periph, I2C_FLAG_MASTER) && !i2c_flag_get(i2c_periph, I2C_FLAG_TR))
+else if(i2c_flag_get(i2c_periph, I2C_FLAG_MASTER) && !i2c_flag_get(i2c_periph, I2C_FLAG_TR))
+{
+    /* Check if receive buffer is not empty */
+    if (i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_RBNE))
     {
-        /* Check if receive buffer is not empty */
-        if (i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_RBNE))
-        {
-            /* Special timing logic for N > 2 bytes, based on official GD32 example */
-            if (i2c_obj->msg->len > 2 && (i2c_obj->msg->len - i2c_obj->count) == 3)
-            {
-                /* Wait for BTC to be set for byte N-2. This ensures N-2 is fully shifted
-                   out before we disable ACK for byte N-1. */
-                while(!i2c_flag_get(i2c_periph, I2C_FLAG_BTC));
-                /* Disable ACK to send NACK after the next byte (N-1) is received */
-                i2c_ack_config(i2c_periph, I2C_ACK_DISABLE);
-            }
+        rt_uint32_t remaining = i2c_obj->msg->len - i2c_obj->count;
 
-            i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
+        /* Handle ACK control for multi-byte reads */
+        if (remaining > 3) {
+            // For N > 3, ACK is enabled by default (set in xfer). Do nothing special here.
+        } else if (remaining == 3) {
+            rt_tick_t btc_timeout_ticks = (rt_tick_from_millisecond(10) > 1) ? rt_tick_from_millisecond(10) : 1;
 
-            /* Check if this was the last byte */
-            if (i2c_obj->count == i2c_obj->msg->len)
-            {
-                if (!(i2c_obj->msg->flags & RT_I2C_NO_STOP))
-                {
-                    i2c_stop_on_bus(i2c_periph);
+            /* Wait for BTC to be set for byte N-2. Timeout added for robustness. */
+            rt_tick_t start_tick = rt_tick_get();
+            while (!i2c_flag_get(i2c_periph, I2C_FLAG_BTC)) {
+                if (rt_tick_get() - start_tick > btc_timeout_ticks) { // Arbitrary short timeout
+                     LOG_W("I2C BTC wait timeout (N-2).");
+                     i2c_obj->result = -RT_ETIMEOUT;
+                     i2c_stop_on_bus(i2c_periph); // Try to recover
+                     rt_completion_done(&i2c_obj->completion);
+                     return; // Exit ISR
                 }
-                i2c_obj->result = RT_EOK;
-                rt_completion_done(&i2c_obj->completion);
             }
+            /* Disable ACK to send NACK after the next byte (N-1) is received */
+            i2c_ack_config(i2c_periph, I2C_ACK_DISABLE);
+        }
+        /* Read the received data byte */
+        i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
+
+        /* Check if this was the last byte */
+        if (i2c_obj->count == i2c_obj->msg->len) {
+            i2c_ack_config(i2c_periph, I2C_ACK_ENABLE);
+
+            if (!(i2c_obj->msg->flags & RT_I2C_NO_STOP)) {
+                i2c_stop_on_bus(i2c_periph);
+            }
+            i2c_obj->result = RT_EOK;
+            rt_completion_done(&i2c_obj->completion);
         }
     }
+}
 }
 
 /**
@@ -133,32 +146,53 @@ static void gd32_i2c_irq_handler(struct gd32_i2c *i2c_obj)
 static void gd32_i2c_err_irq_handler(struct gd32_i2c *i2c_obj)
 {
     uint32_t i2c_periph = i2c_obj->config->i2c_periph;
+    i2c_obj->result = -RT_ERROR; // Default error
 
     /* Acknowledge failure */
-    if (i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_AERR))
-    {
+    if (i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_AERR)) {
         i2c_interrupt_flag_clear(i2c_periph, I2C_INT_FLAG_AERR);
-        i2c_obj->result = -RT_EIO;
-        LOG_D("I2C NACK error.");
+        i2c_obj->result = -RT_EIO; // More specific error
+        LOG_D("I2C NACK/Acknowledge error (AERR).");
     }
     /* Bus error */
-    else if (i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_BERR))
-    {
+    if (i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_BERR)) {
         i2c_interrupt_flag_clear(i2c_periph, I2C_INT_FLAG_BERR);
         i2c_obj->result = -RT_ERROR;
-        LOG_E("I2C bus error.");
+        LOG_E("I2C Bus error (BERR).");
     }
-    /* Other errors should be handled as needed */
-    else
-    {
-        if(i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_LOSTARB)) i2c_interrupt_flag_clear(i2c_periph, I2C_INT_FLAG_LOSTARB);
-        if(i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_OUERR)) i2c_interrupt_flag_clear(i2c_periph, I2C_INT_FLAG_OUERR);
-        i2c_obj->result = -RT_ERROR;
-        LOG_E("I2C other error.");
+    /* Arbitration lost */
+    if (i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_LOSTARB)) {
+        i2c_interrupt_flag_clear(i2c_periph, I2C_INT_FLAG_LOSTARB);
+        i2c_obj->result = -RT_EBUSY; // Appropriate error?
+        LOG_W("I2C Arbitration lost (LOSTARB).");
+    }
+    /* Overrun/Underrun */
+    if (i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_OUERR)) {
+        i2c_interrupt_flag_clear(i2c_periph, I2C_INT_FLAG_OUERR);
+        i2c_obj->result = -RT_EIO; // Input/Output error?
+        LOG_E("I2C Overrun/Underrun error (OUERR).");
+    }
+    /* SMBus related errors (if applicable) */
+    if (i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_SMBALT)) {
+        i2c_interrupt_flag_clear(i2c_periph, I2C_INT_FLAG_SMBALT);
+        LOG_W("I2C SMBus Alert (SMBALT).");
+    }
+    if (i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_SMBTO)) {
+         i2c_interrupt_flag_clear(i2c_periph, I2C_INT_FLAG_SMBTO);
+         LOG_W("I2C SMBus Timeout (SMBTO).");
+    }
+    if (i2c_interrupt_flag_get(i2c_periph, I2C_INT_FLAG_PECERR)) {
+         i2c_interrupt_flag_clear(i2c_periph, I2C_INT_FLAG_PECERR);
+         LOG_W("I2C PEC Error (PECERR).");
     }
 
     /* In case of error, always try to send a stop condition to release the bus */
     i2c_stop_on_bus(i2c_periph);
+    /* Disable all I2C interrupts to prevent further interrupts from this error */
+    i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
+    i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
+    i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
+
     /* Wake up the waiting thread */
     rt_completion_done(&i2c_obj->completion);
 }
@@ -208,9 +242,9 @@ static rt_ssize_t gd32_i2c_master_xfer(struct rt_i2c_bus_device *bus, struct rt_
         }
 
         /* Enable interrupts */
+        i2c_interrupt_enable(i2c_periph, I2C_INT_ERR);
         i2c_interrupt_enable(i2c_periph, I2C_INT_EV);
         i2c_interrupt_enable(i2c_periph, I2C_INT_BUF);
-        i2c_interrupt_enable(i2c_periph, I2C_INT_ERR);
         /* Generate start condition */
         i2c_start_on_bus(i2c_periph);
 
@@ -218,9 +252,9 @@ static rt_ssize_t gd32_i2c_master_xfer(struct rt_i2c_bus_device *bus, struct rt_
         ret = rt_completion_wait(&i2c_obj->completion, bus->timeout);
 
         /* Disable interrupts after transfer is done or timed out */
+        i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
         i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
         i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
-        i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
 
         /* Restore ACK and ACKPOS to default state for next transfer */
         i2c_ack_config(i2c_periph, I2C_ACK_ENABLE);
