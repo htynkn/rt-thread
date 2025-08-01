@@ -38,180 +38,215 @@ static const struct gd32_i2c_config i2c_configs[] =
 
 static struct gd32_i2c i2c_objs[sizeof(i2c_configs) / sizeof(i2c_configs[0])];
 
+
+// 在 gd32_i2c_irq_handler 函数定义之前，加入以下辅助函数
+
+/**
+ * @brief 处理起始位已发送 (SBSEND) 事件
+ */
+static inline void gd32_i2c_handle_sbsend(struct gd32_i2c *i2c_obj)
+{
+    uint32_t i2c_periph = i2c_obj->config->i2c_periph;
+    uint8_t dir = (i2c_obj->msg->flags & RT_I2C_RD) ? I2C_RECEIVER : I2C_TRANSMITTER;
+    i2c_master_addressing(i2c_periph, i2c_obj->msg->addr << 1, dir);
+}
+
+/**
+ * @brief 处理地址已发送 (ADDSEND) 事件
+ */
+static inline void gd32_i2c_handle_addsend(struct gd32_i2c *i2c_obj)
+{
+    uint32_t i2c_periph = i2c_obj->config->i2c_periph;
+
+    /* 清除 ADDSEND 标志位 (通过读取 STAT0 和 STAT1) */
+    (void)I2C_STAT0(i2c_periph);
+    (void)I2C_STAT1(i2c_periph);
+
+    if (i2c_obj->msg->flags & RT_I2C_RD) /* Master Receiver */
+    {
+        if (i2c_obj->msg->len == 1)
+        {
+            // 对于 N=1 的读取，此时必须禁用 ACK
+            i2c_ack_config(i2c_periph, I2C_ACK_DISABLE);
+        }
+        // 对于 N=2 的读取，POS 位已在 xfer 中设置，ACK 在 BTC 中处理
+    }
+}
+
+/**
+ * @brief 处理发送缓冲区为空 (TBE) 事件
+ */
+static inline void gd32_i2c_handle_tbe(struct gd32_i2c *i2c_obj)
+{
+    uint32_t i2c_periph = i2c_obj->config->i2c_periph;
+
+    if (i2c_obj->count < i2c_obj->msg->len)
+    {
+        i2c_data_transmit(i2c_periph, i2c_obj->msg->buf[i2c_obj->count++]);
+    }
+    else
+    {
+        // 所有数据已发送，等待 BTC 标志来确认传输完成
+        // 此处不再发送数据，TBE 中断会在 BTC 置位后自动停止
+    }
+}
+
+/**
+ * @brief 处理接收缓冲区非空 (RBNE) 事件
+ */
+static inline void gd32_i2c_handle_rbne(struct gd32_i2c *i2c_obj)
+{
+    uint32_t i2c_periph = i2c_obj->config->i2c_periph;
+
+    // 只要 RBNE 置位，就读取数据
+    if (i2c_obj->count < i2c_obj->msg->len)
+    {
+        i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
+    }
+    else
+    {
+        // 意外接收到数据，丢弃
+        (void)i2c_data_receive(i2c_periph);
+    }
+}
+
+/**
+ * @brief 处理字节传输完成 (BTC) 事件
+ */
+static inline void gd32_i2c_handle_btc(struct gd32_i2c *i2c_obj)
+{
+    uint32_t i2c_periph = i2c_obj->config->i2c_periph;
+
+    if (i2c_obj->msg->flags & RT_I2C_RD) /* Master Receiver */
+    {
+        /*
+         * BTC 在接收模式下的处理逻辑非常关键
+         * 它用于处理 N>2 时的最后3个字节 和 N=2 的情况
+         */
+        if (i2c_obj->msg->len > 2 && i2c_obj->count == i2c_obj->msg->len - 3)
+        {
+            // 场景：还剩最后3个字节时，我们收到了 BTC
+            // 1. 关闭 BUF 中断，切换到 BTC 驱动的接收模式
+            i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
+            // 2. 读取当前数据
+            i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
+        }
+        else if (i2c_obj->count == i2c_obj->msg->len - 2)
+        {
+             // 场景：还剩最后2个字节时，收到了 BTC
+            // 1. 关闭 ACK
+            i2c_ack_config(i2c_periph, I2C_ACK_DISABLE);
+            // 2. 读取倒数第二个字节
+            i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
+            // 3. 发送 STOP
+            if (!(i2c_obj->msg->flags & RT_I2C_NO_STOP))
+            {
+                i2c_stop_on_bus(i2c_periph);
+            }
+            // 4. 读取最后一个字节 (它已经在移位寄存器里了)
+            i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
+            
+            // 5. 传输完成
+            i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
+            i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
+            i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
+            i2c_obj->result = RT_EOK;
+            rt_completion_done(&i2c_obj->completion);
+        }
+    }
+    else /* Master Transmitter */
+    {
+        // 发送模式下，BTC 表示最后一个字节已发送完成
+        if (i2c_obj->count >= i2c_obj->msg->len)
+        {
+            if (!(i2c_obj->msg->flags & RT_I2C_NO_STOP))
+            {
+                i2c_stop_on_bus(i2c_periph);
+            }
+            i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
+            i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
+            i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
+            i2c_obj->result = RT_EOK;
+            rt_completion_done(&i2c_obj->completion);
+        }
+    }
+}
+
 /**
  * @brief I2C event interrupt handler. This is the core state machine for I2C transfers.
+ *        This version is refactored to be cleaner and more robust, inspired by Zephyr OS.
  * @param i2c_obj: The I2C object context.
  */
 /**
  * @brief I2C event interrupt handler. This is the core state machine for I2C transfers.
- * @param i2c_obj: The I2C object context.
- */
-/**
- * @brief I2C event interrupt handler. This is the core state machine for I2C transfers.
- *        This implementation is heavily inspired by the robust state machine found
- *        in the Zephyr OS GD32 I2C driver.
- * @param i2c_obj: The I2C object context.
- */
-/**
- * @brief I2C event interrupt handler. This is the core state machine for I2C transfers.
- *        This version is corrected to use macros compatible with the provided gd32e23x_i2c.h.
- * @param i2c_obj: The I2C object context.
- */
-/**
- * @brief I2C event interrupt handler. This is the core state machine for I2C transfers.
- *        This version corrects the BTC/RBNE logic for short (N<=2) vs long (N>2) reads.
+ *        This version is refactored to be cleaner and more robust.
  * @param i2c_obj: The I2C object context.
  */
 static void gd32_i2c_irq_handler(struct gd32_i2c *i2c_obj)
 {
     uint32_t i2c_periph = i2c_obj->config->i2c_periph;
-    uint32_t stat0 = I2C_STAT0(i2c_periph);
-    uint32_t stat1 = I2C_STAT1(i2c_periph);
+    uint32_t stat0, stat1;
+
+    stat0 = I2C_STAT0(i2c_periph);
+    stat1 = I2C_STAT1(i2c_periph); // 读取STAT1用于清除某些标志位，如ADDSEND
 
     LOG_D("IRQ handler: STAT0=0x%08x, STAT1=0x%08x", stat0, stat1);
 
-    if (stat0 & I2C_STAT0_SBSEND)
+    // --- Master Mode Event Handling ---
+    if (stat1 & I2C_STAT1_MASTER)
     {
-        uint8_t dir = (i2c_obj->msg->flags & RT_I2C_RD) ? I2C_RECEIVER : I2C_TRANSMITTER;
-        i2c_master_addressing(i2c_periph, i2c_obj->msg->addr << 1, dir);
-    }
-    else if (stat0 & I2C_STAT0_ADDSEND)
-    {
-        /* 清除 ADDSEND 标志 */
-        (void)stat1;
+        if (stat0 & I2C_STAT0_SBSEND)
+        {
+            gd32_i2c_handle_sbsend(i2c_obj);
+            return; // SBSEND 是独立的起始事件
+        }
+
+        if (stat0 & I2C_STAT0_ADDSEND)
+        {
+            gd32_i2c_handle_addsend(i2c_obj);
+            // 对于发送器，地址发送后TBE会置位，需要继续处理
+            // 对于接收器，地址发送后需要等待RBNE，所以可以不立即返回
+        }
 
         if (i2c_obj->msg->flags & RT_I2C_RD) /* Master Receiver */
         {
-            if (i2c_obj->msg->len == 1)
+            /* 接收器逻辑: BTC优先，因为它用于处理N>1接收的结束阶段 */
+            if (stat0 & I2C_STAT0_BTC)
             {
-                // N=1: 清除ACK位, 然后立即发送STOP
-                i2c_ack_config(i2c_periph, I2C_ACK_DISABLE);
-                if (!(i2c_obj->msg->flags & RT_I2C_NO_STOP))
-                {
-                    i2c_stop_on_bus(i2c_periph);
-                }
+                gd32_i2c_handle_btc(i2c_obj);
             }
-            else if (i2c_obj->msg->len == 2)
+            else if (stat0 & I2C_STAT0_RBNE)
             {
-                // N=2: 在ADDSEND之后, 必须立即清除ACK位
-                i2c_ack_config(i2c_periph, I2C_ACK_DISABLE);
+                gd32_i2c_handle_rbne(i2c_obj);
             }
         }
-    }
-    else if ((stat1 & I2C_STAT1_MASTER) && (stat1 & I2C_STAT1_TR)) /* Master Transmitter */
-    {
-        if (stat0 & I2C_STAT0_TBE)
+        else /* Master Transmitter */
         {
+            /*
+             * 发送器逻辑:
+             * 当TBE置位时，我们就可以发送数据。
+             * 当BTC也置位时，表示前一个字节已经完整发送出去。
+             * 我们只在所有数据都发送完毕后，才关心BTC，用它来触发STOP。
+             */
             if (i2c_obj->count < i2c_obj->msg->len)
             {
-                i2c_data_transmit(i2c_periph, i2c_obj->msg->buf[i2c_obj->count++]);
+                // 如果还有数据要发送，并且发送缓冲区为空
+                if (stat0 & I2C_STAT0_TBE)
+                {
+                    gd32_i2c_handle_tbe(i2c_obj); // 发送下一个字节
+                }
             }
             else
             {
-                i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
-            }
-        }
-        if (stat0 & I2C_STAT0_BTC)
-        {
-            if (i2c_obj->count >= i2c_obj->msg->len)
-            {
-                if (!(i2c_obj->msg->flags & RT_I2C_NO_STOP))
+                // 所有数据已写入缓冲区，等待最后一个字节发送完成
+                if (stat0 & I2C_STAT0_BTC)
                 {
-                    i2c_stop_on_bus(i2c_periph);
-                }
-                i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
-                i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
-                i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
-                i2c_obj->result = RT_EOK;
-                rt_completion_done(&i2c_obj->completion);
-            }
-        }
-    }
-     else if ((stat1 & I2C_STAT1_MASTER) && !(stat1 & I2C_STAT1_TR)) /* Master Receiver */
-    {
-        /*
-         * 关键点: 必须优先处理 BTC，因为 BTC 标志是 TBE/RBNE 的超集。
-         * 在接收的最后阶段，BTC 和 RBNE 可能会同时置位。
-         */
-
-        if (stat0 & I2C_STAT0_BTC)
-        {
-            /*
-             * BTC 表示字节传输完成。在接收模式下，这通常用于处理传输的最后几个字节。
-             * 这是处理 N=2 和 N>3 场景下最后阶段的地方。
-             */
-            if (i2c_obj->msg->len == 2) // N=2 的特殊情况
-            {
-                // 1. 发送STOP信号
-                if (!(i2c_obj->msg->flags & RT_I2C_NO_STOP))
-                {
-                    i2c_stop_on_bus(i2c_periph);
-                }
-                // 2. 连续读取两个字节
-                i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
-                i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
-
-                // 3. 结束传输
-                i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
-                i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
-                i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
-
-                i2c_obj->result = RT_EOK;
-                rt_completion_done(&i2c_obj->completion);
-            }
-            else // N > 2 场景下的最后阶段 (接收最后两个字节)
-            {
-                i2c_interrupt_disable(i2c_periph, I2C_INT_BUF); // 关闭缓冲区中断
-
-                // 1. 禁用ACK
-                i2c_ack_config(i2c_periph, I2C_ACK_DISABLE);
-                // 2. 读取倒数第二个字节
-                i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
-                // 3. 发送STOP信号
-                if (!(i2c_obj->msg->flags & RT_I2C_NO_STOP))
-                {
-                    i2c_stop_on_bus(i2c_periph);
-                }
-                // 4. 读取最后一个字节
-                i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
-
-                // 5. 结束传输
-                i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
-                i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
-                
-                i2c_obj->result = RT_EOK;
-                rt_completion_done(&i2c_obj->completion);
-            }
-        }
-        else if (stat0 & I2C_STAT0_RBNE)
-        {
-            if ((i2c_obj->msg->len > 2) && (i2c_obj->count == i2c_obj->msg->len - 3))
-            {
-                /* 剩下最后3个字节时，等待BTC来处理，不再响应RBNE */
-                i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
-                i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
-            }
-            else // 处理 N=1 和 N>3 场景下的普通字节
-            {
-                i2c_obj->msg->buf[i2c_obj->count++] = i2c_data_receive(i2c_periph);
-
-                if (i2c_obj->count == i2c_obj->msg->len)
-                {
-                    // 仅用于 N=1 的场景
-                    if (!(i2c_obj->msg->flags & RT_I2C_NO_STOP))
-                    {
-                        i2c_stop_on_bus(i2c_periph); // 注意: 对于N=1, STOP应在ADDSEND后就发送
-                    }
-                    i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
-                    i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
-                    i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
-
-                    i2c_obj->result = RT_EOK;
-                    rt_completion_done(&i2c_obj->completion);
+                    gd32_i2c_handle_btc(i2c_obj); // 调用它来发送STOP并完成传输
                 }
             }
         }
     }
+    // --- Slave Mode event handling would go here (if implemented) ---
 }
 
 /**
@@ -370,28 +405,47 @@ static rt_ssize_t gd32_i2c_master_xfer(struct rt_i2c_bus_device *bus, struct rt_
         i2c_obj->result = -RT_ERROR;
         rt_completion_init(&i2c_obj->completion);
 
+        /* 默认开启ACK */
         i2c_ack_config(i2c_periph, I2C_ACK_ENABLE);
+        /* 默认ACK当前字节 */
         i2c_ackpos_config(i2c_periph, I2C_ACKPOS_CURRENT);
 
-        if ((i2c_obj->msg->flags & RT_I2C_RD) && (i2c_obj->msg->len == 2))
+        /* 针对特定长度读取的预处理 */
+        if (i2c_obj->msg->flags & RT_I2C_RD)
         {
-            i2c_ackpos_config(i2c_periph, I2C_ACKPOS_NEXT);
+            if (i2c_obj->msg->len == 1)
+            {
+                // N=1: ADDSEND之后会关闭ACK, 此处无需操作
+            }
+            else if (i2c_obj->msg->len == 2)
+            {
+                // N=2: 设置POS位，让硬件在接收第2个字节时准备NACK
+                i2c_ackpos_config(i2c_periph, I2C_ACKPOS_NEXT);
+            }
         }
-
+        
+        /* 使能所有需要的 I2C 中断 */
         i2c_interrupt_enable(i2c_periph, I2C_INT_EV);
         i2c_interrupt_enable(i2c_periph, I2C_INT_ERR);
         i2c_interrupt_enable(i2c_periph, I2C_INT_BUF);
 
+        /* 发送起始位，启动传输 */
         i2c_start_on_bus(i2c_periph);
+        
         ret = rt_completion_wait(&i2c_obj->completion, bus->timeout);
 
+        /* 后续的超时和错误处理... (保持不变) */
         if (ret != RT_EOK)
         {
             LOG_E("I2C msg %d timeout. Forcing cleanup.", i);
             i2c_interrupt_disable(i2c_periph, I2C_INT_EV);
             i2c_interrupt_disable(i2c_periph, I2C_INT_ERR);
             i2c_interrupt_disable(i2c_periph, I2C_INT_BUF);
-            i2c_stop_on_bus(i2c_periph);
+            // 尝试发送一个STOP位来释放总线
+            if (!(msgs[i].flags & RT_I2C_NO_STOP))
+            {
+                i2c_stop_on_bus(i2c_periph);
+            }
             return -RT_ETIMEOUT;
         }
 
