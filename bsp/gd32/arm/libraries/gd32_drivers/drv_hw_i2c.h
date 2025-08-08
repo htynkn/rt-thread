@@ -15,51 +15,6 @@
 #include <rtdevice.h>
 #include <board.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 
-/* I2C hardware configuration */
-struct gd32_i2c_config
-{
-    rt_uint32_t i2c_periph;     /* I2C peripheral base address */
-    rcu_periph_enum periph_clk; /* I2C peripheral clock */
-
-    rcu_periph_enum scl_clk;    /* SCL pin clock */
-    rt_uint32_t scl_port;       /* SCL pin port */
-    rt_uint32_t scl_pin;        /* SCL pin */
-    rt_uint32_t scl_af;         /* SCL pin alternate function */
-
-    rcu_periph_enum sda_clk;    /* SDA pin clock */
-    rt_uint32_t sda_port;       /* SDA pin port */
-    rt_uint32_t sda_pin;        /* SDA pin */
-    rt_uint32_t sda_af;         /* SDA pin alternate function */
-
-    IRQn_Type ev_irq_type;      /* Event IRQn */
-    IRQn_Type er_irq_type;      /* Error IRQn */
-
-    rt_uint32_t i2c_clock_hz;        /* I2C clock speed in Hz, e.g., 100000 for 100kHz */
-
-    const char *device_name;    /* Device name */
-};
-
-/* I2C runtime context */
-struct gd32_i2c
-{
-    struct rt_i2c_bus_device parent;
-    const struct gd32_i2c_config *config;
-
-    /* Interrupt-driven transfer context */
-    struct rt_i2c_msg *msg;
-    volatile rt_size_t count;
-    volatile rt_err_t result;
-    struct rt_completion completion;
-};
-
-int rt_hw_i2c_init(void);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif /* __DRV_HW_I2C_H__ */
