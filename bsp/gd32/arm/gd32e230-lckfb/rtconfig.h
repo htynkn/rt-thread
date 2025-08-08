@@ -328,6 +328,8 @@
 /* touch drivers */
 
 /* end of touch drivers */
+#define PKG_USING_AT24CXX
+#define PKG_USING_AT24CXX_LATEST_VERSION
 #define PKG_USING_SSD1306
 #define PKG_USING_SSD1306_DEBUG
 #define PKG_USING_SSD1306_I2C_ADDRESS 0x3C
